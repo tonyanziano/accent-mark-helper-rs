@@ -1,6 +1,11 @@
-use std::env;
+use std::{env, ffi::c_void};
 
-use winsafe::{self as w, co::WH, gui, prelude::*, HHOOK, KEYBDINPUT};
+use winsafe::{
+    co::{VK, WH},
+    gui,
+    prelude::*,
+    HHOOK, KEYBDINPUT,
+};
 
 fn main() {
     println!("Hello, world!");
@@ -10,32 +15,51 @@ fn main() {
     parsed_args.iter().for_each(|f| println!("{f}"));
 
     // here the thread id is set to 0 to target all desktop threads (we'll see if this is bad later :) )
-    let hookResult = HHOOK::SetWindowsHookEx(WH::KEYBOARD_LL, keyboardHook, None, Some(0));
-    let hook = match hookResult {
-        Ok(result) => result,
-        Err(err) => panic!("Problem opening the file: {err:?}"),
+    let hook_result = HHOOK::SetWindowsHookEx(WH::KEYBOARD_LL, keyboard_hook, None, Some(0));
+    let inner_hook = match hook_result {
+        Ok(hhook) => hhook,
+        Err(err) => {
+            panic!("There was an error while trying to create the hook: {err:?}");
+        }
     };
 
     // here we are just creating a window to try and keep the app running
-    let myWin = MyWindow::new();
-    if let Err(e) = myWin.wnd.run_main(None) {
+    let my_win = MyWindow::new();
+    if let Err(e) = my_win.wnd.run_main(None) {
         // ... and run it
         eprintln!("{}", e);
     }
+
+    // TODO: remember to release the hook when the app exits (on window exit??)
 }
 
-extern "system" fn keyboardHook(code: i32, wParam: usize, lParam: isize) -> isize {
-    println!("Got some keyboard event: {code}, {wParam}, {lParam}");
+extern "system" fn keyboard_hook(code: i32, wparam: usize, lparam: isize) -> isize {
+    println!("Got some keyboard event: {code}, {wparam}, {lparam}");
 
     // TODO: if code !== 0, then pass the message to CallNextHookEx() and return the result
 
-    // otherwise, do stuff
-    // TODO: we need to somehow take the pointer "lParam" from C and cast it to the KEYBDINPUT struct in Rust
-    let parsedStruct = unsafe {
-        KEYBDINPUT::from((HHOOK::ptr(&self) as *mut KEYBDINPUT).);
+    // lets take the raw pointer and cast it to a pointer
+    let raw_ptr = lparam as *mut isize;
+    // now let's cast this to a pointer of the type we are actually trying to access
+    let my_ptr = raw_ptr as *mut KEYBDINPUT;
+    // now we dereference the pointer (with *) to get the struct, and then create a mutable ref to it
+    let my_ptr_ref = unsafe { &mut *my_ptr };
+    let key_code = my_ptr_ref.wVk;
+    println!("Trying to look at C pointer props: {key_code}");
+    match key_code {
+        VK::SHIFT => println!("Got SHIFT key!"),
+        VK::CONTROL => println!("Got CTRL key!"),
+        VK::CHAR_0 => println!("Got 0 key!"),
+        _ => println!("Got some other key we don't care about!"),
     };
 
-    return 1;
+    // return the result of the next hook in the chain
+    //  NOTE: The first argument is supposed to be the HHOOK handle returned by the initial
+    //  SetWindowsHookEx. However, I can't figure out how to make this variable available to
+    //  this function in Rust, and after some digging, the API docs specifically say
+    //  that this parameter is ignored
+    //  (https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-callnexthookex#parameters)
+    HHOOK::CallNextHookEx(&HHOOK::NULL, WH::KEYBOARD_LL, wparam, lparam)
 }
 
 #[derive(Clone)]
