@@ -1,5 +1,4 @@
-use std::{env, ffi::c_void};
-
+use std::env;
 use winsafe::{
     co::{VK, WH},
     gui,
@@ -16,7 +15,7 @@ fn main() {
 
     // here the thread id is set to 0 to target all desktop threads (we'll see if this is bad later :) )
     let hook_result = HHOOK::SetWindowsHookEx(WH::KEYBOARD_LL, keyboard_hook, None, Some(0));
-    let inner_hook = match hook_result {
+    let mut inner_hook = match hook_result {
         Ok(hhook) => hhook,
         Err(err) => {
             panic!("There was an error while trying to create the hook: {err:?}");
@@ -29,14 +28,21 @@ fn main() {
         // ... and run it
         eprintln!("{}", e);
     }
-
-    // TODO: remember to release the hook when the app exits (on window exit??)
+    println!("End of program.");
+    // clean up the keyboard hook
+    inner_hook
+        .UnhookWindowsHookEx()
+        .expect("There was an issue cleaning up the keyboard listener on app quit.");
 }
 
 extern "system" fn keyboard_hook(code: i32, wparam: usize, lparam: isize) -> isize {
     println!("Got some keyboard event: {code}, {wparam}, {lparam}");
 
-    // TODO: if code !== 0, then pass the message to CallNextHookEx() and return the result
+    // if code !== 0, then pass the message to CallNextHookEx() and return the result
+    // (advised by Windows docs)
+    if code != 0 {
+        return HHOOK::CallNextHookEx(&HHOOK::NULL, WH::KEYBOARD_LL, wparam, lparam);
+    }
 
     // lets take the raw pointer and cast it to a pointer
     let raw_ptr = lparam as *mut isize;
@@ -62,6 +68,9 @@ extern "system" fn keyboard_hook(code: i32, wparam: usize, lparam: isize) -> isi
     HHOOK::CallNextHookEx(&HHOOK::NULL, WH::KEYBOARD_LL, wparam, lparam)
 }
 
+//
+// ==== Code below was copied from a sample ====
+//
 #[derive(Clone)]
 pub struct MyWindow {
     wnd: gui::WindowMain,   // responsible for managing the window
